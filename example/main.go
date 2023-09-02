@@ -12,7 +12,7 @@ import (
 
 func main() {
 	log.SetLevel(log.DebugLevel)
-	c := client.NewClient("732", "0", "", "", "")
+	c := client.NewClient("732", "0", "", "", "", "")
 	//弹幕事件
 	c.OnDanmaku(func(danmaku *message.Danmaku) {
 		if danmaku.Type == message.EmoticonDanmaku {
