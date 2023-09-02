@@ -21,7 +21,9 @@ type Client struct {
 	enterUID            string
 	buvid               string
 	userAgent           string
-	referer             string
+	origin              string
+	cookie              string
+	wscookie            string
 	token               string
 	host                string
 	hostList            []string
@@ -32,14 +34,12 @@ type Client struct {
 }
 
 // NewClient 创建一个新的弹幕 client
-func NewClient(roomID string, enterUID string, buvid string, userAgent string, referer string) *Client {
+func NewClient(roomID string, enterUID string, buvid string) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Client{
 		tempID:              roomID,
 		enterUID:            enterUID,
 		buvid:               buvid,
-		userAgent:           userAgent,
-		referer:             referer,
 		eventHandlers:       &eventHandlers{},
 		customEventHandlers: &customEventHandlers{},
 		done:                ctx.Done(),
@@ -61,7 +61,7 @@ func (c *Client) init() error {
 		c.roomID = c.tempID
 	}
 	if c.host == "" {
-		info, err := api.GetDanmuInfo(c.roomID)
+		info, err := api.GetDanmuInfo(c.roomID, c.cookie)
 		if err != nil {
 			c.hostList = []string{"broadcastlv.chat.bilibili.com"}
 		} else {
@@ -74,8 +74,8 @@ func (c *Client) init() error {
 	return nil
 }
 
-func (c *Client) getHeader() http.Header {
-	if c.userAgent == "" && c.referer == "" {
+func (c *Client) getWSHeader() http.Header {
+	if c.userAgent == "" && c.wscookie == "" && c.origin == "" {
 		return nil
 	}
 
@@ -84,8 +84,11 @@ func (c *Client) getHeader() http.Header {
 	if c.userAgent != "" {
 		header.Set("User-Agent", c.userAgent)
 	}
-	if c.referer != "" {
-		header.Set("Referer", c.referer)
+	if c.origin != "" {
+		header.Set("Origin", c.origin)
+	}
+	if c.wscookie != "" {
+		header.Set("Cookie", c.wscookie)
 	}
 	return header
 }
@@ -96,7 +99,7 @@ retry:
 	// 随着重连会自动切换弹幕服务器
 	c.host = c.hostList[retryCount%len(c.hostList)]
 	retryCount++
-	header := c.getHeader()
+	header := c.getWSHeader()
 	conn, res, err := websocket.DefaultDialer.Dial(fmt.Sprintf("wss://%s/sub", c.host), header)
 	if err != nil {
 		log.Errorf("connect dial failed, retry %d times", retryCount)
@@ -174,8 +177,32 @@ func (c *Client) Stop() {
 	c.cancel()
 }
 
-func (c *Client) SetHost(host string) {
-	c.host = host
+// SetHostList (备线)
+func (c *Client) SetHostList(hostlist []string) {
+	c.host = hostlist[0]
+	c.hostList = hostlist
+}
+
+// SetToken (备线)
+func (c *Client) SetToken(token string) {
+	c.token = token
+}
+
+// SetWSCookie (备备线)
+func (c *Client) SetWSCookie(wscookie string) {
+	c.wscookie = wscookie
+}
+
+func (c *Client) SetOrigin(origin string) {
+	c.origin = origin
+}
+
+func (c *Client) SetUserAgent(UserAgent string) {
+	c.userAgent = UserAgent
+}
+
+func (c *Client) SetCookie(cookie string) {
+	c.cookie = cookie
 }
 
 // UseDefaultHost 使用默认 host broadcastlv.chat.bilibili.com

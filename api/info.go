@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
 )
 
@@ -53,9 +54,12 @@ type DanmuInfo struct {
 	} `json:"data"`
 }
 
-func GetDanmuInfo(roomID string) (*DanmuInfo, error) {
+func GetDanmuInfo(roomID string, cookie string) (*DanmuInfo, error) {
 	result := &DanmuInfo{}
-	err := GetJson(fmt.Sprintf("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=%s&type=0", roomID), result)
+	headers := &http.Header{}
+
+	headers.Set("Cookie", cookie)
+	err := GetJsonWithHeader(fmt.Sprintf("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=%s&type=0", roomID), headers, result)
 	if err != nil {
 		return nil, err
 	}

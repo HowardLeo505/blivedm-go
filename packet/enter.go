@@ -22,7 +22,7 @@ func NewEnterPacket(uid int, buvid string, roomID int, key string) []byte {
 	ent := &Enter{
 		UID:      uid,
 		RoomID:   roomID,
-		ProtoVer: 2,
+		ProtoVer: 3,
 		Buvid:    buvid,
 		Platform: "web",
 		//ClientVer: "1.14.3",
