@@ -5,9 +5,10 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"encoding/json"
+	"io"
+
 	"github.com/andybalholm/brotli"
 	log "github.com/sirupsen/logrus"
-	"io"
 )
 
 const (
@@ -18,8 +19,8 @@ const (
 )
 
 const (
-	_ = iota
-	_
+	HandShake = iota
+	HandShakeResponse
 	HeartBeat
 	HeartBeatResponse
 	_
@@ -49,15 +50,22 @@ func NewPacket(protocolVersion uint16, operation uint32, body []byte) Packet {
 // NewPlainPacket 构造新的 Plain 包
 // 对外暴露的方法中 operation 全部使用int
 func NewPlainPacket(operation int, body []byte) Packet {
-	return NewPacket(Plain, uint32(operation), body)
+	return NewPacket(1, uint32(operation), body)
 }
 
 func NewPacketFromBytes(data []byte) Packet {
-	packLen := binary.BigEndian.Uint32(data[0:4])
-	// 校验包长度
-	if int(packLen) != len(data) {
+	if len(data) == 0 {
 		log.Error("error packet")
+		return Packet{ProtocolVersion: 1, Operation: uint32(3), Body: make([]byte, 0)}
 	}
+
+	packLen := binary.BigEndian.Uint32(data[0:4])
+
+	if int(packLen) == 0 || int(packLen) != len(data) {
+		log.Error("error packet")
+		return Packet{ProtocolVersion: 1, Operation: uint32(3), Body: make([]byte, 0)}
+	}
+
 	pv := binary.BigEndian.Uint16(data[6:8])
 	op := binary.BigEndian.Uint32(data[8:12])
 	body := data[16:packLen]
@@ -94,10 +102,21 @@ func (p *Packet) Unmarshal(v interface{}) error {
 }
 
 func (p *Packet) Build() []byte {
+	// default packet with some constants
+	// raw header length: buf[5] = 16
+	// seq: buf[16] = 1
 	rawBuf := []byte{0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+
+	// protocol version
 	binary.BigEndian.PutUint16(rawBuf[6:], p.ProtocolVersion)
+
+	// operation code
 	binary.BigEndian.PutUint32(rawBuf[8:], p.Operation)
+
+	// append payload
 	rawBuf = append(rawBuf, p.Body...)
+
+	// payload length
 	binary.BigEndian.PutUint32(rawBuf, uint32(len(rawBuf)))
 	return rawBuf
 }

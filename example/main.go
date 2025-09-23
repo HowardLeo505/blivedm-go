@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/HowardLeo505/blivedm-go/api"
 	"github.com/HowardLeo505/blivedm-go/client"
 	"github.com/HowardLeo505/blivedm-go/message"

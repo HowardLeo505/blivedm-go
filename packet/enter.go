@@ -2,18 +2,18 @@ package packet
 
 import (
 	"encoding/json"
+
 	log "github.com/sirupsen/logrus"
 )
 
 type Enter struct {
 	UID      int    `json:"uid"`
+	Buvid    string `json:"buvid"`
 	RoomID   int    `json:"roomid"`
 	ProtoVer int    `json:"protover"`
-	Buvid    string `json:"buvid"`
 	Platform string `json:"platform"`
-	//ClientVer string `json:"clientver"`
-	Type int    `json:"type"`
-	Key  string `json:"key"`
+	Type     int    `json:"type"`
+	Key      string `json:"key"`
 }
 
 // NewEnterPacket 构造进入房间的包
@@ -21,13 +21,12 @@ type Enter struct {
 func NewEnterPacket(uid int, buvid string, roomID int, key string) []byte {
 	ent := &Enter{
 		UID:      uid,
+		Buvid:    buvid,
 		RoomID:   roomID,
 		ProtoVer: 3,
-		Buvid:    buvid,
-		Platform: "web",
-		//ClientVer: "1.14.3",
-		Type: 2,
-		Key:  key,
+		Platform: "danmuji",
+		Type:     2,
+		Key:      key,
 	}
 	m, err := json.Marshal(ent)
 	if err != nil {

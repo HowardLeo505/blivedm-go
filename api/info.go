@@ -1,9 +1,12 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+
+	"github.com/tidwall/gjson"
 )
 
 // RoomInfo
@@ -54,28 +57,51 @@ type DanmuInfo struct {
 	} `json:"data"`
 }
 
-func GetDanmuInfo(roomID string, cookie string) (*DanmuInfo, error) {
+func GetUid(cookie string) (int, error) {
+	headers := &http.Header{}
+	headers.Set("Cookie", cookie)
+	headers.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0")
+	resp, err := HttpGet("https://api.bilibili.com/x/web-interface/nav", headers)
+	if err != nil {
+		return 0, err
+	}
+	j := gjson.ParseBytes(resp)
+	if j.Get("code").Int() != 0 || !j.Get("data.isLogin").Bool() {
+		return 0, errors.New(j.Get("message").String())
+	}
+	return int(j.Get("data.mid").Int()), nil
+}
+
+func GetDanmuInfo(roomID int, cookie string) (*DanmuInfo, error) {
 	result := &DanmuInfo{}
 	headers := &http.Header{}
-
 	headers.Set("Cookie", cookie)
-	err := GetJsonWithHeader(fmt.Sprintf("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=%s&type=0", roomID), headers, result)
+	headers.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0")
+
+	signedUrl, err := WbiKeysSignString(fmt.Sprintf("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=%d&type=0", roomID))
+	if err != nil {
+		return nil, err
+	}
+
+	err = GetJsonWithHeader(signedUrl, headers, result)
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func GetRoomInfo(roomID string) (*RoomInfo, error) {
+func GetRoomInfo(roomID int) (*RoomInfo, error) {
 	result := &RoomInfo{}
-	err := GetJson(fmt.Sprintf("https://api.live.bilibili.com/room/v1/Room/room_init?id=%s", roomID), result)
+	headers := &http.Header{}
+	headers.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0")
+	err := GetJsonWithHeader(fmt.Sprintf("https://api.live.bilibili.com/room/v1/Room/room_init?id=%d", roomID), headers, result)
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func GetRoomRealID(roomID string) (string, error) {
+func GetRoomRealID(roomID int) (string, error) {
 	res, err := GetRoomInfo(roomID)
 	if err != nil {
 		return "", err

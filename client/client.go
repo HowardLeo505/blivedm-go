@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/HowardLeo505/blivedm-go/api"
@@ -16,53 +19,52 @@ import (
 
 type Client struct {
 	conn                *websocket.Conn
-	roomID              string
-	tempID              string
+	roomID              int
 	enterUID            string
 	buvid               string
+	cookie              string
 	userAgent           string
 	origin              string
-	cookie              string
 	wscookie            string
 	token               string
 	host                string
 	hostList            []string
+	retryCount          int
 	eventHandlers       *eventHandlers
 	customEventHandlers *customEventHandlers
 	cancel              context.CancelFunc
 	done                <-chan struct{}
+	lock                sync.RWMutex
 }
 
 // NewClient 创建一个新的弹幕 client
-func NewClient(roomID string, enterUID string, buvid string) *Client {
+func NewClient(roomID int, enterUID string, buvid string) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Client{
-		tempID:              roomID,
+		roomID:              roomID,
 		enterUID:            enterUID,
 		buvid:               buvid,
+		retryCount:          0,
 		eventHandlers:       &eventHandlers{},
 		customEventHandlers: &customEventHandlers{},
 		done:                ctx.Done(),
 		cancel:              cancel,
+		lock:                sync.RWMutex{},
 	}
 }
 
-// init 初始化 获取真实 roomID 和 弹幕服务器 host
+// init 初始化 获取真实 RoomID 和 弹幕服务器 host
 func (c *Client) init() error {
-	rid, _ := strconv.Atoi(c.tempID)
-	// 处理 shortID
-	if rid <= 1000 && c.roomID == "" {
-		realID, err := api.GetRoomRealID(c.tempID)
-		if err != nil {
-			return err
-		}
-		c.roomID = realID
-	} else {
-		c.roomID = c.tempID
+	roomInfo, err := api.GetRoomInfo(c.roomID)
+	// 失败降级
+	if err != nil || roomInfo.Code != 0 {
+		log.Errorf("room=%d init GetRoomInfo fialed, %s", c.roomID, err)
 	}
+	c.roomID = roomInfo.Data.RoomId
 	if c.host == "" {
 		info, err := api.GetDanmuInfo(c.roomID, c.cookie)
-		if err != nil {
+		// Workaround for getDanmuInfo API. Error code 352
+		if err != nil || info.Code != 0 {
 			c.hostList = []string{"broadcastlv.chat.bilibili.com"}
 		} else {
 			for _, h := range info.Data.HostList {
@@ -70,6 +72,10 @@ func (c *Client) init() error {
 			}
 		}
 		c.token = info.Data.Token
+	}
+	if c.token == "" {
+		log.Error("cannot get account token")
+		return errors.New("token 获取失败")
 	}
 	return nil
 }
@@ -94,26 +100,21 @@ func (c *Client) getWSHeader() http.Header {
 }
 
 func (c *Client) connect() error {
-	retryCount := 0
-retry:
-	// 随着重连会自动切换弹幕服务器
-	c.host = c.hostList[retryCount%len(c.hostList)]
-	retryCount++
 	header := c.getWSHeader()
+retry:
+	c.host = c.hostList[c.retryCount%len(c.hostList)]
+	c.retryCount++
 	conn, res, err := websocket.DefaultDialer.Dial(fmt.Sprintf("wss://%s/sub", c.host), header)
 	if err != nil {
-		log.Errorf("connect dial failed, retry %d times", retryCount)
+		log.Errorf("connect dial failed, retry %d times", c.retryCount)
 		time.Sleep(2 * time.Second)
 		goto retry
 	}
 	c.conn = conn
-	res.Body.Close()
+	_ = res.Body.Close()
 	if err = c.sendEnterPacket(); err != nil {
-		log.Errorf("failed to send enter packet, retry %d times", retryCount)
-		goto retry
-	}
-	if _, _, err = c.conn.ReadMessage(); fmt.Sprintf("%+v", err) == "websocket: close 1006 (abnormal closure): unexpected EOF" {
-		log.Info("request server busy, retrying other server")
+		log.Errorf("failed to send enter packet, retry %d times", c.retryCount)
+		time.Sleep(2 * time.Second)
 		goto retry
 	}
 	return nil
@@ -128,7 +129,7 @@ func (c *Client) wsLoop() {
 		default:
 			msgType, data, err := c.conn.ReadMessage()
 			if err != nil {
-				log.Info("reconnect")
+				log.Error("ws message read failed, reconnecting")
 				time.Sleep(time.Duration(3) * time.Millisecond)
 				_ = c.connect()
 				continue
@@ -151,9 +152,11 @@ func (c *Client) heartBeatLoop() {
 		case <-c.done:
 			return
 		case <-time.After(30 * time.Second):
+			c.lock.Lock()
 			if err := c.conn.WriteMessage(websocket.BinaryMessage, pkt); err != nil {
 				log.Error(err)
 			}
+			c.lock.Unlock()
 			log.Debug("send: HeartBeat")
 		}
 	}
@@ -177,18 +180,18 @@ func (c *Client) Stop() {
 	c.cancel()
 }
 
-// SetHostList (备线)
+// SetHostList
 func (c *Client) SetHostList(hostlist []string) {
 	c.host = hostlist[0]
 	c.hostList = hostlist
 }
 
-// SetToken (备线)
+// SetToken
 func (c *Client) SetToken(token string) {
 	c.token = token
 }
 
-// SetWSCookie (备备线)
+// SetWSCookie
 func (c *Client) SetWSCookie(wscookie string) {
 	c.wscookie = wscookie
 }
@@ -211,15 +214,18 @@ func (c *Client) UseDefaultHost() {
 }
 
 func (c *Client) sendEnterPacket() error {
-	rid, err := strconv.Atoi(c.roomID)
-	if err != nil {
-		return errors.New("error roomID")
-	}
+	//rid, err := strconv.Atoi(c.roomID)
+	//if err != nil {
+	//	return errors.New("error roomID")
+	//}
 	uid, err := strconv.Atoi(c.enterUID)
 	if err != nil {
 		return errors.New("error enterUID")
 	}
-	pkt := packet.NewEnterPacket(uid, c.buvid, rid, c.token)
+
+	pkt := packet.NewEnterPacket(uid, c.buvid, c.roomID, c.token)
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	if err = c.conn.WriteMessage(websocket.BinaryMessage, pkt); err != nil {
 		return err
 	}
