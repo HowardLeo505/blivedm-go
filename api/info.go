@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 
 	"github.com/tidwall/gjson"
 )
@@ -72,11 +71,8 @@ func GetUid(cookie string) (int, error) {
 	return int(j.Get("data.mid").Int()), nil
 }
 
-func GetDanmuInfo(roomID int, cookie string) (*DanmuInfo, error) {
+func GetDanmuInfo(roomID int, headers *http.Header) (*DanmuInfo, error) {
 	result := &DanmuInfo{}
-	headers := &http.Header{}
-	headers.Set("Cookie", cookie)
-	headers.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0")
 
 	signedUrl, err := WbiKeysSignString(fmt.Sprintf("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id=%d&type=0", roomID))
 	if err != nil {
@@ -90,21 +86,12 @@ func GetDanmuInfo(roomID int, cookie string) (*DanmuInfo, error) {
 	return result, nil
 }
 
-func GetRoomInfo(roomID int) (*RoomInfo, error) {
+func GetRoomInfo(roomID int, headers *http.Header) (*RoomInfo, error) {
 	result := &RoomInfo{}
-	headers := &http.Header{}
-	headers.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0")
+
 	err := GetJsonWithHeader(fmt.Sprintf("https://api.live.bilibili.com/room/v1/Room/room_init?id=%d", roomID), headers, result)
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
-}
-
-func GetRoomRealID(roomID int) (string, error) {
-	res, err := GetRoomInfo(roomID)
-	if err != nil {
-		return "", err
-	}
-	return strconv.Itoa(res.Data.RoomId), nil
 }

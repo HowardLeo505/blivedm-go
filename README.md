@@ -7,9 +7,15 @@ bilibili 直播弹幕 golang 库
 ## 此仓库为原仓库的Fork仓库，根据个人需求做了一些修改
 **从原仓库的[#f56426f](https://github.com/Akegarasu/blivedm-go/commit/f56426ffa70926176d95db50f699911e734040c0) 提交开始本仓库与原仓库不再同步。**
 
-### ChangeLog
+### ChangeLog: 
 
-2023.9.3更新：NewClient方法传入roomID, enterUID, buvid后，**务必**使用**SetOrigin、SetUserAgent、SetCookie**方法设置Origin、UA、Cookie字段。
+**2025.9.24更新：** 从上游同步代码，保留从调用方注入参数能力。**注意：HostList从调用方注入时，Token需一并注入。**
+
+SetOrigin与SetReferer方法设置全局API请求头中的Origin、Referer参数。
+
+---
+
+**2023.9.3更新：** NewClient方法传入roomID, enterUID, buvid后，**务必**使用**SetOrigin、SetUserAgent、SetCookie**方法设置Origin、UA、Cookie字段。
 
 在NewClient中添加enterUID,buvid参数，对应NewEnterPacket中的UID和buvid，UID可以为0，buvid传入空字符串即可.  
 在NewClient方法中添加userAgent, referer参数，对应WS连接升级前HTTP请求头中的User-Agent和Referer字段，可以传入空字符串，传空字符串默认请求头中**不带**对应字段.

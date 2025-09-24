@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,16 +16,19 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const DefaultUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0"
+
 type Client struct {
 	conn                *websocket.Conn
-	roomID              int
-	enterUID            string
-	buvid               string
-	cookie              string
-	userAgent           string
-	origin              string
-	wscookie            string
-	token               string
+	RoomID              int
+	EnterUID            string
+	Buvid               string
+	Cookie              string
+	UserAgent           string
+	Origin              string
+	Referer             string
+	WsCookie            string
+	Token               string
 	host                string
 	hostList            []string
 	retryCount          int
@@ -41,9 +43,9 @@ type Client struct {
 func NewClient(roomID int, enterUID string, buvid string) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Client{
-		roomID:              roomID,
-		enterUID:            enterUID,
-		buvid:               buvid,
+		RoomID:              roomID,
+		EnterUID:            enterUID,
+		Buvid:               buvid,
 		retryCount:          0,
 		eventHandlers:       &eventHandlers{},
 		customEventHandlers: &customEventHandlers{},
@@ -55,14 +57,29 @@ func NewClient(roomID int, enterUID string, buvid string) *Client {
 
 // init 初始化 获取真实 RoomID 和 弹幕服务器 host
 func (c *Client) init() error {
-	roomInfo, err := api.GetRoomInfo(c.roomID)
-	// 失败降级
-	if err != nil || roomInfo.Code != 0 {
-		log.Errorf("room=%d init GetRoomInfo fialed, %s", c.roomID, err)
+	if c.Cookie != "" {
+		if !strings.Contains(c.Cookie, "bili_jct") || !strings.Contains(c.Cookie, "SESSDATA") {
+			log.Errorf("cannot found account token")
+			return errors.New("no account token found")
+		}
+	} else {
+		return errors.New("cookie is empty")
 	}
-	c.roomID = roomInfo.Data.RoomId
+
+	// 短RoomID处理
+	if c.RoomID <= 1000 {
+		headers := c.getRIDHeader()
+		roomInfo, err := api.GetRoomInfo(c.RoomID, &headers)
+		// 失败降级
+		if err != nil || roomInfo.Code != 0 {
+			log.Errorf("room=%d init GetRoomInfo fialed, %s", c.RoomID, err)
+		}
+		c.RoomID = roomInfo.Data.RoomId
+	}
+
 	if c.host == "" {
-		info, err := api.GetDanmuInfo(c.roomID, c.cookie)
+		headers := c.getDanmuInfoHeader()
+		info, err := api.GetDanmuInfo(c.RoomID, &headers)
 		// Workaround for getDanmuInfo API. Error code 352
 		if err != nil || info.Code != 0 {
 			c.hostList = []string{"broadcastlv.chat.bilibili.com"}
@@ -71,31 +88,80 @@ func (c *Client) init() error {
 				c.hostList = append(c.hostList, h.Host)
 			}
 		}
-		c.token = info.Data.Token
+		if c.Token == "" {
+			c.Token = info.Data.Token
+		}
 	}
-	if c.token == "" {
-		log.Error("cannot get account token")
-		return errors.New("token 获取失败")
+
+	if c.Token == "" {
+		log.Error("cannot get account Token")
+		return errors.New("Token 获取失败")
 	}
+
 	return nil
 }
 
 func (c *Client) getWSHeader() http.Header {
-	if c.userAgent == "" && c.wscookie == "" && c.origin == "" {
+	if c.WsCookie == "" && c.Origin == "" {
 		return nil
 	}
 
 	header := http.Header{}
 
-	if c.userAgent != "" {
-		header.Set("User-Agent", c.userAgent)
+	if c.UserAgent != "" {
+		header.Set("User-Agent", c.UserAgent)
+	} else {
+		header.Set("User-Agent", DefaultUA)
 	}
-	if c.origin != "" {
-		header.Set("Origin", c.origin)
+
+	if c.Origin != "" {
+		header.Set("Origin", c.Origin)
 	}
-	if c.wscookie != "" {
-		header.Set("Cookie", c.wscookie)
+	if c.WsCookie != "" {
+		header.Set("Cookie", c.WsCookie)
 	}
+	return header
+}
+
+func (c *Client) getRIDHeader() http.Header {
+	header := http.Header{}
+
+	if c.UserAgent != "" {
+		header.Set("User-Agent", c.UserAgent)
+	} else {
+		header.Set("User-Agent", DefaultUA)
+	}
+
+	if c.Referer != "" {
+		header.Set("Referer", c.Referer)
+	}
+
+	if c.Origin != "" {
+		header.Set("Origin", c.Origin)
+	}
+
+	return header
+}
+
+func (c *Client) getDanmuInfoHeader() http.Header {
+	header := http.Header{}
+
+	if c.UserAgent != "" {
+		header.Set("User-Agent", c.UserAgent)
+	} else {
+		header.Set("User-Agent", DefaultUA)
+	}
+
+	header.Set("Cookie", c.Cookie)
+
+	if c.Referer != "" {
+		header.Set("Referer", c.Referer)
+	}
+
+	if c.Origin != "" {
+		header.Set("Origin", c.Origin)
+	}
+
 	return header
 }
 
@@ -180,32 +246,37 @@ func (c *Client) Stop() {
 	c.cancel()
 }
 
-// SetHostList
+// SetHostList 用于从调用方直接注入HostList
 func (c *Client) SetHostList(hostlist []string) {
 	c.host = hostlist[0]
 	c.hostList = hostlist
 }
 
-// SetToken
+// SetToken 用于从调用方直接注入WS连接Token
 func (c *Client) SetToken(token string) {
-	c.token = token
+	c.Token = token
 }
 
-// SetWSCookie
+// SetWSCookie 用于从调用方直接注入WS连接时的Cookie
 func (c *Client) SetWSCookie(wscookie string) {
-	c.wscookie = wscookie
+	c.WsCookie = wscookie
 }
 
 func (c *Client) SetOrigin(origin string) {
-	c.origin = origin
+	c.Origin = origin
 }
 
+func (c *Client) SetReferer(referer string) {
+	c.Referer = referer
+}
+
+// SetUserAgent 用于从调用方直接注入UA，不使用默认的UA
 func (c *Client) SetUserAgent(UserAgent string) {
-	c.userAgent = UserAgent
+	c.UserAgent = UserAgent
 }
 
 func (c *Client) SetCookie(cookie string) {
-	c.cookie = cookie
+	c.Cookie = cookie
 }
 
 // UseDefaultHost 使用默认 host broadcastlv.chat.bilibili.com
@@ -214,16 +285,16 @@ func (c *Client) UseDefaultHost() {
 }
 
 func (c *Client) sendEnterPacket() error {
-	//rid, err := strconv.Atoi(c.roomID)
+	//rid, err := strconv.Atoi(c.RoomID)
 	//if err != nil {
-	//	return errors.New("error roomID")
+	//	return errors.New("error RoomID")
 	//}
-	uid, err := strconv.Atoi(c.enterUID)
+	uid, err := strconv.Atoi(c.EnterUID)
 	if err != nil {
-		return errors.New("error enterUID")
+		return errors.New("error EnterUID")
 	}
 
-	pkt := packet.NewEnterPacket(uid, c.buvid, c.roomID, c.token)
+	pkt := packet.NewEnterPacket(uid, c.Buvid, c.RoomID, c.Token)
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	if err = c.conn.WriteMessage(websocket.BinaryMessage, pkt); err != nil {

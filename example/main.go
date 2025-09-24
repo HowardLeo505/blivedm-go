@@ -13,7 +13,7 @@ import (
 
 func main() {
 	log.SetLevel(log.DebugLevel)
-	c := client.NewClient("732", "0", "")
+	c := client.NewClient(732, "", "")
 	c.SetOrigin("")
 	c.SetUserAgent("")
 	c.SetCookie("")
